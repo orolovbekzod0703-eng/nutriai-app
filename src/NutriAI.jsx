@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { onAuth, signInGoogle, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
 
 /* ═══════════════════════════════════════════════════════════
    NutriAI v2 — AI Ovqatlanish Kuzatuvchi
@@ -43,6 +44,12 @@ const I18N = {
     sedentaryD: "Ofis ishi", lightD: "Haftada 1-3 mashq", moderateD: "Haftada 3-5 mashq", veryActiveD: "Har kuni mashq",
     placeholderMeal: "Masalan: bir kosa palov, non, ko'k choy",
     confirmReset: "Barcha ma'lumotlar o'chiriladi. Davom etasizmi?",
+    signInTitle: "Hisobingizga kiring",
+    signInDesc: "Ma'lumotlaringiz bulutda saqlanadi va barcha qurilmalaringizda sinxronlanadi",
+    continueGoogle: "Google bilan davom etish",
+    signingIn: "Kirilmoqda...",
+    signInErr: "Kirishda xatolik. Qaytadan urinib ko'ring.",
+    logout: "Hisobdan chiqish",
   },
   ru: {
     welcome: "Добро пожаловать в NutriAI!",
@@ -81,6 +88,12 @@ const I18N = {
     sedentaryD: "Офисная работа", lightD: "1-3 трен./нед", moderateD: "3-5 трен./нед", veryActiveD: "Ежедневно",
     placeholderMeal: "Например: тарелка плова, лепёшка, зелёный чай",
     confirmReset: "Все данные будут удалены. Продолжить?",
+    signInTitle: "Войдите в аккаунт",
+    signInDesc: "Ваши данные сохранятся в облаке и синхронизируются на всех устройствах",
+    continueGoogle: "Продолжить с Google",
+    signingIn: "Вход...",
+    signInErr: "Ошибка входа. Попробуйте снова.",
+    logout: "Выйти",
   },
   en: {
     welcome: "Welcome to NutriAI!",
@@ -119,6 +132,12 @@ const I18N = {
     sedentaryD: "Desk job", lightD: "1-3 workouts/wk", moderateD: "3-5 workouts/wk", veryActiveD: "Daily training",
     placeholderMeal: "e.g. bowl of plov, flatbread, green tea",
     confirmReset: "All data will be erased. Continue?",
+    signInTitle: "Sign in",
+    signInDesc: "Your data is saved to the cloud and synced across all your devices",
+    continueGoogle: "Continue with Google",
+    signingIn: "Signing in...",
+    signInErr: "Sign-in failed. Please try again.",
+    logout: "Log out",
   },
 };
 
@@ -366,6 +385,9 @@ export default function NutriAI() {
   const [dark, setDark] = useState(false);
   const [tab, setTab] = useState("home");
   const [loaded, setLoaded] = useState(false);
+  const [user, setUser] = useState(undefined); // undefined = tekshirilmoqda, null = kirmagan
+  const [signingIn, setSigningIn] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   const [profile, setProfile] = useState({
     name: "", gender: "male", birthYear: 1998, height: 175,
@@ -403,35 +425,56 @@ export default function NutriAI() {
   const T = THEMES[dark ? "dark" : "light"];
   const targets = useMemo(() => calcTargets(profile), [profile]);
 
-  // ── Load / persist ──
+  // ── Auth holatini kuzatish ──
+  useEffect(() => onAuth((u) => {
+    setUser(u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL } : null);
+  }), []);
+
+  // ── Foydalanuvchi ma'lumotini yuklash (bulut → lokal zaxira) ──
   useEffect(() => {
     let cancelled = false;
+    if (user === undefined) return;              // auth hali tekshirilmoqda → splash
+    if (user === null) { setScreen("login"); setLoaded(true); return; }
     (async () => {
-      const saved = await load("nutriai:state", null);
+      let saved = null;
+      try { saved = await loadUserData(user.uid); } catch { /* offline */ }
+      const localCache = await load("nutriai:state", null);
+      if (!saved && localCache) saved = localCache; // eski lokal ma'lumotni birinchi kirishda ko'chirish
       if (cancelled) return;
+
       if (saved) {
         if (saved.profile) setProfile(saved.profile);
-        if (saved.meals) setMeals(saved.meals.map((m) => ({ ...m, time: new Date(m.time) })));
+        if (saved.meals) {
+          const imgMap = {};
+          (localCache?.meals || []).forEach((m) => { if (m.img) imgMap[m.id] = m.img; });
+          setMeals(saved.meals.map((m) => ({ ...m, time: new Date(m.time), img: m.img || imgMap[m.id] || null })));
+        }
         if (saved.waterLog) setWaterLog(saved.waterLog);
         if (saved.weights) setWeights(saved.weights);
         if (saved.favorites) setFavorites(saved.favorites);
         if (saved.lang) setLang(saved.lang);
         setDark(!!saved.dark);
-        if (saved.onboarded) { setScreen("app"); setLoaded(true); return; }
+        setScreen(saved.onboarded ? "app" : "onboarding");
+      } else {
+        if (user.name) setProfile((p) => ({ ...p, name: p.name || user.name.split(" ")[0] }));
+        setScreen("onboarding");
       }
       setLoaded(true);
-      setTimeout(() => !cancelled && setScreen((s) => (s === "splash" ? "onboarding" : s)), 1700);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
 
+  // ── Saqlash: lokal zaxira (rasmlar bilan) + bulut (debounced) ──
   useEffect(() => {
-    if (!loaded || screen === "splash") return;
-    store("nutriai:state", {
+    if (!loaded || screen === "splash" || screen === "login" || !user) return;
+    const state = {
       profile, meals, waterLog, weights, favorites, lang, dark,
       onboarded: screen === "app",
-    });
-  }, [profile, meals, waterLog, weights, favorites, lang, dark, screen, loaded]);
+    };
+    store("nutriai:state", state);
+    const id = setTimeout(() => { saveUserData(user.uid, state).catch(() => {}); }, 800);
+    return () => clearTimeout(id);
+  }, [profile, meals, waterLog, weights, favorites, lang, dark, screen, loaded, user]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, chatLoading]);
 
@@ -649,6 +692,25 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
     setSummaryLoading(false);
   };
 
+  // ── Auth handlers ──
+  const handleGoogle = async () => {
+    setSigningIn(true); setAuthError(null);
+    try { await signInGoogle(); }
+    catch { setAuthError(t.signInErr); }
+    setSigningIn(false);
+  };
+
+  const handleLogout = async () => {
+    try { localStorage.removeItem("nutriai:state"); } catch { /* noop */ }
+    try { await fbLogout(); } catch { /* noop */ }
+    setMeals([]); setWeights([]); setWaterLog({}); setFavorites([1, 9, 15]);
+    setChat([]); setDaySummary(null); setStep(0);
+    setProfile({
+      name: "", gender: "male", birthYear: 1998, height: 175,
+      weight: 75, targetWeight: 70, activity: "light", goal: "lose", restrictions: [],
+    });
+  };
+
   // ── Styles ──
   const S = {
     app: {
@@ -700,6 +762,50 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
           Nutri<span style={{ color: "#4ade80" }}>AI</span>
         </h1>
         <p style={{ color: "#86efac", fontSize: 15, marginTop: 6, fontWeight: 500 }}>Aqlli ovqatlanish yordamchingiz</p>
+      </div>
+    );
+  }
+
+  // ═══ LOGIN ═══
+  if (screen === "login") {
+    return (
+      <div style={{ ...S.app, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 26px", background: "linear-gradient(150deg,#052e16,#14532d,#166534)" }}>
+        <style>{css}</style>
+        <div style={{ width: 88, height: 88, borderRadius: 26, background: "linear-gradient(135deg,#22c55e,#16a34a)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 42, boxShadow: "0 8px 32px rgba(34,197,94,.45)" }}>🥗</div>
+        <h1 style={{ color: "#fff", fontSize: 32, fontWeight: 800, marginTop: 18, letterSpacing: -1 }}>
+          Nutri<span style={{ color: "#4ade80" }}>AI</span>
+        </h1>
+        <h2 style={{ color: "#fff", fontSize: 20, fontWeight: 700, marginTop: 24, textAlign: "center" }}>{t.signInTitle}</h2>
+        <p style={{ color: "#bbf7d0", fontSize: 14.5, lineHeight: 1.6, marginTop: 8, textAlign: "center", maxWidth: 340 }}>{t.signInDesc}</p>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 22 }}>
+          {Object.entries({ uz: "O'zbek", ru: "Русский", en: "English" }).map(([k, v]) => (
+            <button key={k} onClick={() => setLang(k)} style={{
+              padding: "8px 15px", borderRadius: 20, fontSize: 13.5, fontWeight: 700, cursor: "pointer",
+              border: `2px solid ${lang === k ? "#4ade80" : "rgba(255,255,255,.25)"}`,
+              background: lang === k ? "rgba(74,222,128,.15)" : "transparent", color: lang === k ? "#4ade80" : "#d1fae5",
+            }}>{v}</button>
+          ))}
+        </div>
+
+        <button onClick={handleGoogle} disabled={signingIn} style={{
+          marginTop: 30, width: "100%", maxWidth: 360, padding: "14px 20px", borderRadius: 14,
+          border: "none", cursor: "pointer", background: "#fff", color: "#1f2937",
+          fontSize: 15.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 11, boxShadow: "0 4px 18px rgba(0,0,0,.25)", opacity: signingIn ? .7 : 1,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+          </svg>
+          {signingIn ? t.signingIn : t.continueGoogle}
+        </button>
+
+        {authError && (
+          <p style={{ marginTop: 14, color: "#fecaca", fontSize: 13.5, textAlign: "center" }}>⚠️ {authError}</p>
+        )}
       </div>
     );
   }
@@ -1526,6 +1632,19 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
                   <span style={{ fontSize: 13.5, color: T.muted }}>{v} ›</span>
                 </div>
               ))}
+
+              {user && (
+                <div style={{ padding: "13px 0", borderTop: `1px solid ${T.divider}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 600, color: T.text2 }}>👤 {t.logout}</div>
+                    {user.email && <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>}
+                  </div>
+                  <button onClick={handleLogout} style={{
+                    padding: "6px 14px", borderRadius: 10, cursor: "pointer", fontSize: 12.5, fontWeight: 700,
+                    border: `1.5px solid ${T.inputBorder}`, background: "transparent", color: T.text2, flexShrink: 0,
+                  }}>{t.logout} ›</button>
+                </div>
+              )}
 
               <div style={{ padding: "13px 0 0", borderTop: `1px solid ${T.divider}` }}>
                 <button onClick={() => {
