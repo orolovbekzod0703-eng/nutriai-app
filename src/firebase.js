@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+  getRedirectResult, signOut, onAuthStateChanged,
 } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
@@ -19,8 +20,37 @@ export const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
 export const onAuth = (cb) => onAuthStateChanged(auth, cb);
-export const signInGoogle = () => signInWithPopup(auth, provider);
 export const logout = () => signOut(auth);
+
+const isMobile = () =>
+  typeof navigator !== "undefined" &&
+  /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent);
+
+// Telefonlarda popup ishlamaydi → redirect ishlatamiz.
+// Kompyuterda popup, u bloklansa avtomatik redirect'ga o'tamiz.
+export async function signInGoogle() {
+  if (isMobile()) {
+    await signInWithRedirect(auth, provider);
+    return;
+  }
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    const code = e?.code || "";
+    if ([
+      "auth/popup-blocked",
+      "auth/cancelled-popup-request",
+      "auth/operation-not-supported-in-this-environment",
+    ].includes(code)) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw e;
+  }
+}
+
+// Redirect'dan qaytgach natijani (yoki xatoni) olish uchun
+export const getRedirect = () => getRedirectResult(auth);
 
 // Firestore hujjat hajmi limiti (1 MiB) oshib ketmasligi uchun
 // base64 ovqat rasmlarini bulutga yubormaymiz — ular faqat qurilmada (localStorage) qoladi.

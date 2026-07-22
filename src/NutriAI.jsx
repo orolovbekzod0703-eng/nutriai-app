@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { onAuth, signInGoogle, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
+import { onAuth, signInGoogle, getRedirect, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
 
 /* ═══════════════════════════════════════════════════════════
    NutriAI v2 — AI Ovqatlanish Kuzatuvchi
@@ -430,6 +430,14 @@ export default function NutriAI() {
     setUser(u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL } : null);
   }), []);
 
+  // ── Redirect (telefon) orqali kirishdan qaytgan xatoni ushlash ──
+  useEffect(() => {
+    getRedirect().catch((e) => {
+      console.error("Google redirect sign-in error:", e?.code, e?.message);
+      setAuthError((e?.code || "") + " — " + t.signInErr);
+    });
+  }, []);
+
   // ── Foydalanuvchi ma'lumotini yuklash (bulut → lokal zaxira) ──
   useEffect(() => {
     let cancelled = false;
@@ -696,8 +704,11 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
   const handleGoogle = async () => {
     setSigningIn(true); setAuthError(null);
     try { await signInGoogle(); }
-    catch { setAuthError(t.signInErr); }
-    setSigningIn(false);
+    catch (e) {
+      console.error("Google sign-in error:", e?.code, e?.message);
+      setAuthError((e?.code ? e.code + " — " : "") + t.signInErr);
+      setSigningIn(false);
+    }
   };
 
   const handleLogout = async () => {
