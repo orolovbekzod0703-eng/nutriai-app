@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
   getRedirectResult, signOut, onAuthStateChanged,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
 } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
@@ -51,6 +52,14 @@ export async function signInGoogle() {
 
 // Redirect'dan qaytgach natijani (yoki xatoni) olish uchun
 export const getRedirect = () => getRedirectResult(auth);
+
+// ─── Email + parol ───
+export async function signUpEmail(email, password, name) {
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  if (name) { try { await updateProfile(cred.user, { displayName: name }); } catch { /* noop */ } }
+  return cred;
+}
+export const signInEmail = (email, password) => signInWithEmailAndPassword(auth, email, password);
 
 // Firestore hujjat hajmi limiti (1 MiB) oshib ketmasligi uchun
 // base64 ovqat rasmlarini bulutga yubormaymiz — ular faqat qurilmada (localStorage) qoladi.

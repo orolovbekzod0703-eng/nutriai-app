@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { onAuth, signInGoogle, getRedirect, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
+import { onAuth, signInGoogle, getRedirect, signUpEmail, signInEmail, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
 
 /* ═══════════════════════════════════════════════════════════
    NutriAI v2 — AI Ovqatlanish Kuzatuvchi
@@ -50,6 +50,14 @@ const I18N = {
     signingIn: "Kirilmoqda...",
     signInErr: "Kirishda xatolik. Qaytadan urinib ko'ring.",
     logout: "Hisobdan chiqish",
+    emailF: "Email", passwordF: "Parol", nameF: "Ismingiz",
+    loginBtn: "Kirish", registerBtn: "Ro'yxatdan o'tish",
+    toRegister: "Hisobingiz yo'qmi? Ro'yxatdan o'ting",
+    toLogin: "Hisobingiz bormi? Kiring", orDivider: "yoki",
+    errEmail: "Email manzil noto'g'ri.",
+    errWeakPass: "Parol kamida 6 ta belgidan iborat bo'lsin.",
+    errInUse: "Bu email allaqachon ro'yxatdan o'tgan. Kiring.",
+    errWrong: "Email yoki parol noto'g'ri.",
   },
   ru: {
     welcome: "Добро пожаловать в NutriAI!",
@@ -94,6 +102,14 @@ const I18N = {
     signingIn: "Вход...",
     signInErr: "Ошибка входа. Попробуйте снова.",
     logout: "Выйти",
+    emailF: "Эл. почта", passwordF: "Пароль", nameF: "Ваше имя",
+    loginBtn: "Войти", registerBtn: "Регистрация",
+    toRegister: "Нет аккаунта? Зарегистрируйтесь",
+    toLogin: "Есть аккаунт? Войдите", orDivider: "или",
+    errEmail: "Неверный email.",
+    errWeakPass: "Пароль минимум 6 символов.",
+    errInUse: "Этот email уже зарегистрирован. Войдите.",
+    errWrong: "Неверный email или пароль.",
   },
   en: {
     welcome: "Welcome to NutriAI!",
@@ -138,6 +154,14 @@ const I18N = {
     signingIn: "Signing in...",
     signInErr: "Sign-in failed. Please try again.",
     logout: "Log out",
+    emailF: "Email", passwordF: "Password", nameF: "Your name",
+    loginBtn: "Sign in", registerBtn: "Sign up",
+    toRegister: "No account? Sign up",
+    toLogin: "Have an account? Sign in", orDivider: "or",
+    errEmail: "Invalid email address.",
+    errWeakPass: "Password must be at least 6 characters.",
+    errInUse: "This email is already registered. Sign in.",
+    errWrong: "Wrong email or password.",
   },
 };
 
@@ -388,6 +412,10 @@ export default function NutriAI() {
   const [user, setUser] = useState(undefined); // undefined = tekshirilmoqda, null = kirmagan
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState(null);
+  const [authMode, setAuthMode] = useState("login"); // "login" | "register"
+  const [emailV, setEmailV] = useState("");
+  const [passV, setPassV] = useState("");
+  const [nameV, setNameV] = useState("");
 
   const [profile, setProfile] = useState({
     name: "", gender: "male", birthYear: 1998, height: 175,
@@ -711,6 +739,28 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
     }
   };
 
+  const authErrText = (code) => {
+    if (code === "auth/invalid-email") return t.errEmail;
+    if (code === "auth/weak-password") return t.errWeakPass;
+    if (code === "auth/email-already-in-use") return t.errInUse;
+    if (["auth/wrong-password", "auth/user-not-found", "auth/invalid-credential"].includes(code)) return t.errWrong;
+    return (code ? code + " — " : "") + t.signInErr;
+  };
+
+  const handleEmailAuth = async () => {
+    if (!emailV.trim() || !passV || signingIn) return;
+    setSigningIn(true); setAuthError(null);
+    try {
+      if (authMode === "register") await signUpEmail(emailV.trim(), passV, nameV.trim());
+      else await signInEmail(emailV.trim(), passV);
+      // muvaffaqiyat → onAuth ekranni almashtiradi
+    } catch (e) {
+      console.error("Email auth error:", e?.code, e?.message);
+      setAuthError(authErrText(e?.code));
+      setSigningIn(false);
+    }
+  };
+
   const handleLogout = async () => {
     try { localStorage.removeItem("nutriai:state"); } catch { /* noop */ }
     try { await fbLogout(); } catch { /* noop */ }
@@ -760,6 +810,8 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
     input:focus,textarea:focus{border-color:${GREEN}!important}
     button:active{transform:scale(.97)}
     button:focus-visible{outline:2px solid ${GREEN};outline-offset:2px}
+    .login-inp::placeholder{color:rgba(255,255,255,.5)}
+    .login-inp:focus{border-color:#4ade80!important}
     @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   `;
 
@@ -814,8 +866,51 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
           {signingIn ? t.signingIn : t.continueGoogle}
         </button>
 
+        {/* Ajratgich */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", maxWidth: 360, marginTop: 20 }}>
+          <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.2)" }} />
+          <span style={{ color: "#a7f3d0", fontSize: 12.5 }}>{t.orDivider}</span>
+          <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,.2)" }} />
+        </div>
+
+        {(() => {
+          const li = {
+            width: "100%", maxWidth: 360, padding: "13px 15px", borderRadius: 12, fontSize: 15,
+            border: "1.5px solid rgba(255,255,255,.2)", background: "rgba(255,255,255,.08)",
+            color: "#fff", outline: "none", boxSizing: "border-box", marginTop: 10,
+          };
+          return (
+            <>
+              {authMode === "register" && (
+                <input className="login-inp" style={li} placeholder={t.nameF} value={nameV}
+                  onChange={(e) => setNameV(e.target.value)} />
+              )}
+              <input className="login-inp" style={li} type="email" inputMode="email" autoComplete="email"
+                placeholder={t.emailF} value={emailV} onChange={(e) => setEmailV(e.target.value)} />
+              <input className="login-inp" style={li} type="password"
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                placeholder={t.passwordF} value={passV}
+                onChange={(e) => setPassV(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleEmailAuth()} />
+              <button onClick={handleEmailAuth} disabled={signingIn} style={{
+                marginTop: 12, width: "100%", maxWidth: 360, padding: "13px 20px", borderRadius: 12,
+                border: "none", cursor: "pointer", background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                color: "#fff", fontSize: 15.5, fontWeight: 700, opacity: signingIn ? 0.7 : 1,
+              }}>
+                {signingIn ? t.signingIn : authMode === "register" ? t.registerBtn : t.loginBtn}
+              </button>
+              <button onClick={() => { setAuthMode((m) => (m === "login" ? "register" : "login")); setAuthError(null); }} style={{
+                marginTop: 14, background: "none", border: "none", color: "#bbf7d0",
+                fontSize: 13.5, fontWeight: 600, cursor: "pointer", textDecoration: "underline",
+              }}>
+                {authMode === "login" ? t.toRegister : t.toLogin}
+              </button>
+            </>
+          );
+        })()}
+
         {authError && (
-          <p style={{ marginTop: 14, color: "#fecaca", fontSize: 13.5, textAlign: "center" }}>⚠️ {authError}</p>
+          <p style={{ marginTop: 14, color: "#fecaca", fontSize: 13.5, textAlign: "center", maxWidth: 360 }}>⚠️ {authError}</p>
         )}
       </div>
     );
