@@ -22,6 +22,7 @@ const provider = new GoogleAuthProvider();
 
 export const onAuth = (cb) => onAuthStateChanged(auth, cb);
 export const logout = () => signOut(auth);
+export const getIdToken = () => (auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null));
 
 const isMobile = () =>
   typeof navigator !== "undefined" &&

@@ -1,0 +1,17 @@
+name = "nutriai-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Firestore/Firebase loyiha ID (token tekshiruvi uchun)
+[vars]
+FIREBASE_PROJECT_ID = "fit-counter-ai"
+ALLOWED_ORIGIN = "https://orolovbekzod0703-eng.github.io"
+
+# Kunlik limit hisoblagichi uchun KV ombori.
+# `npx wrangler kv namespace create RL` buyrug'i bergan id ni shu yerga qo'ying:
+[[kv_namespaces]]
+binding = "RL"
+id = "QO_YING_KV_ID"
+
+# GEMINI_API_KEY — bu yerga YOZMANG! Uni secret sifatida qo'shasiz:
+#   npx wrangler secret put GEMINI_API_KEY

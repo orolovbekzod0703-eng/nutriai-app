@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { onAuth, signInGoogle, getRedirect, signUpEmail, signInEmail, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
+import { onAuth, signInGoogle, getRedirect, signUpEmail, signInEmail, getIdToken, logout as fbLogout, saveUserData, loadUserData } from "./firebase.js";
+import { PROXY_URL } from "./config.js";
 
 /* ═══════════════════════════════════════════════════════════
    NutriAI v2 — AI Ovqatlanish Kuzatuvchi
@@ -324,35 +325,53 @@ function toGeminiContents(messages) {
   });
 }
 
-async function callAI(messages, maxTokens = 1200) {
-  const key = getApiKey();
-  if (!key) throw new Error("NO_API_KEY");
-  const body = JSON.stringify({
-    contents: toGeminiContents(messages),
-    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
-  });
+function readGemini(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const out = parts.map((p) => p.text || "").join("");
+  if (!out) throw new Error("BO'SH JAVOB (ehtimol xavfsizlik filtri)");
+  return out;
+}
+
+// (A) Foydalanuvchining o'z kaliti bilan to'g'ridan-to'g'ri Gemini
+async function callGeminiDirect(contents, generationConfig, key) {
+  const body = JSON.stringify({ contents, generationConfig });
   let lastErr = null;
   for (const model of GEMINI_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
     const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    if (resp.ok) {
-      const data = await resp.json();
-      const parts = data?.candidates?.[0]?.content?.parts || [];
-      const out = parts.map((p) => p.text || "").join("");
-      if (!out) throw new Error("BO'SH JAVOB (ehtimol xavfsizlik filtri)");
-      return out;
-    }
-    // 404 (model yo'q) yoki 429 (kvota tugagan) → keyingi modelni sinaymiz
+    if (resp.ok) return readGemini(await resp.json());
     if (resp.status === 404 || resp.status === 429) {
       let d = ""; try { const j = await resp.json(); d = j?.error?.message || ""; } catch { /* noop */ }
       lastErr = new Error(`API_${resp.status}${d ? ": " + d.slice(0, 90) : ""}`);
       continue;
     }
-    let detail = "";
-    try { const j = await resp.json(); detail = j?.error?.message || ""; } catch { /* noop */ }
+    let detail = ""; try { const j = await resp.json(); detail = j?.error?.message || ""; } catch { /* noop */ }
     throw new Error(`API_${resp.status}${detail ? ": " + detail.slice(0, 120) : ""}`);
   }
   throw lastErr || new Error("API_ERR");
+}
+
+// (B) Backend proksi (egasining kaliti) — Firebase token bilan
+async function callProxy(contents, generationConfig) {
+  const token = await getIdToken();
+  if (!token) throw new Error("Avval hisobingizga kiring");
+  const resp = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: JSON.stringify({ contents, generationConfig }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data?.error?.message ? `API_${resp.status}: ${String(data.error.message).slice(0, 120)}` : `API_${resp.status}`);
+  return readGemini(data);
+}
+
+async function callAI(messages, maxTokens = 1200) {
+  const contents = toGeminiContents(messages);
+  const generationConfig = { maxOutputTokens: maxTokens, temperature: 0.4 };
+  const key = getApiKey();
+  if (key) return callGeminiDirect(contents, generationConfig, key); // o'z kaliti bo'lsa
+  if (PROXY_URL) return callProxy(contents, generationConfig);        // aks holda backend
+  throw new Error("NO_API_KEY");
 }
 
 function parseJSON(text) {
