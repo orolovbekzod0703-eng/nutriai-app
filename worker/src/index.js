@@ -6,8 +6,8 @@
    ═══════════════════════════════════════════════════════════ */
 
 const DAILY_LIMIT = 40;
-const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
-const TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const VISION_MODEL = "@cf/llava-hf/llava-1.5-7b-hf";           // rasmni tavsiflaydi
+const TEXT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"; // JSON + kaloriya hisoblaydi
 
 export default {
   async fetch(request, env) {
@@ -71,6 +71,17 @@ function b64ToBytes(b64) {
   return arr;
 }
 
+// Workers AI javobi string yoki obyekt bo'lishi mumkin — har doim matnga o'giramiz
+function extractText(out) {
+  if (out == null) return "";
+  if (typeof out === "string") return out;
+  const r = out.response;
+  if (typeof r === "string") return r;
+  if (r && typeof r === "object") return JSON.stringify(r); // tuzilgan JSON → matn
+  if (typeof out.description === "string") return out.description;
+  return typeof out === "object" ? JSON.stringify(out) : String(out);
+}
+
 // ─── Cloudflare Workers AI chaqiruvi ───
 async function runAI(env, contents, maxTokens) {
   let imageBytes = null;
@@ -87,20 +98,34 @@ async function runAI(env, contents, maxTokens) {
     if (msgText.trim()) messages.push({ role, content: msgText.trim() });
   }
 
+  const cap = Math.min(maxTokens, 2048);
+
   if (imageBytes) {
-    const out = await env.AI.run(VISION_MODEL, {
-      image: imageBytes,
-      prompt: textChunks.join("\n\n"),
-      max_tokens: Math.min(maxTokens, 2048),
+    // 1-bosqich: LLaVA rasmdagi ovqatlarni tavsiflaydi
+    let desc = "";
+    try {
+      const vis = await env.AI.run(VISION_MODEL, {
+        image: imageBytes,
+        prompt: "List every distinct food and drink item visible in this photo. For each item, estimate the portion size (grams or count). Be specific and concise. If a dish looks like Uzbek/Central Asian cuisine (plov, lagman, manti, somsa, shashlik, etc.), name it.",
+        max_tokens: 512,
+      });
+      desc = extractText(vis);
+    } catch { /* rasm tavsifsiz davom etamiz */ }
+
+    // 2-bosqich: kuchli matn modeli JSON + kaloriyani hisoblaydi
+    const instruction = textChunks.join("\n\n");
+    const out = await env.AI.run(TEXT_MODEL, {
+      messages: [{
+        role: "user",
+        content: `${instruction}\n\nThe photo was analyzed by a vision model. Detected items:\n${desc || "(vision unavailable — infer typical items)"}\n\nNow output ONLY the JSON exactly as specified above. No extra text, no markdown fences.`,
+      }],
+      max_tokens: cap,
     });
-    return out.response || out.description || "";
+    return extractText(out);
   }
 
-  const out = await env.AI.run(TEXT_MODEL, {
-    messages,
-    max_tokens: Math.min(maxTokens, 2048),
-  });
-  return out.response || "";
+  const out = await env.AI.run(TEXT_MODEL, { messages, max_tokens: cap });
+  return extractText(out);
 }
 
 // ─── Firebase ID token (RS256 JWT) tekshiruvi ───
