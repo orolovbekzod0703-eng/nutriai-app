@@ -20,11 +20,13 @@ npm run build      # natija: dist/ papkasi
 npm run preview    # build'ni lokal ko'rib chiqish
 ```
 
-## 🤖 AI funksiyalari (ixtiyoriy)
+## 🤖 AI funksiyalari (ixtiyoriy, bepul)
 
-Rasm/matn tahlili, dietolog-chat va kunlik xulosa **Anthropic API** orqali ishlaydi.
-Ilova ichida: **Profil → Sozlamalar → «AI kaliti»** dan o'zingizning `sk-ant-...` kalitingizni kiriting.
-Kalit hech qayerga yuborilmaydi — faqat sizning brauzeringizda saqlanadi va to'g'ridan-to'g'ri Anthropic'ga so'rov yuboriladi.
+Rasm/matn tahlili, dietolog-chat va kunlik xulosa **Google Gemini API** orqali ishlaydi (bepul tarif).
+1. Bepul kalit oling: **https://aistudio.google.com/apikey** → *Create API key* → `AIza...`
+2. Ilovada: **Profil → Sozlamalar → «AI kaliti»** ga qo'ying
+
+Kalit hech qayerga yuborilmaydi — faqat sizning brauzeringizda saqlanadi va to'g'ridan-to'g'ri Google'ga so'rov yuboriladi.
 
 > AI kalitisiz ham ilovaning qolgan hamma qismi to'liq ishlaydi: taomlar bazasi, kaloriya hisobi, suv, vazn, kalendar, yutuqlar.
 

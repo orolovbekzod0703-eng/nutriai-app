@@ -287,27 +287,54 @@ async function load(key, fallback) {
   } catch { return fallback; }
 }
 
-// ─── AI: foydalanuvchi Anthropic API kaliti bilan (brauzerdan to'g'ridan-to'g'ri) ─
+// ─── AI: Google Gemini API (bepul tarif) — kalit foydalanuvchi brauzerida saqlanadi ─
 const API_KEY_STORAGE = "nutriai:apikey";
 export const getApiKey = () => { try { return localStorage.getItem(API_KEY_STORAGE) || ""; } catch { return ""; } };
 export const setApiKey = (k) => { try { k ? localStorage.setItem(API_KEY_STORAGE, k) : localStorage.removeItem(API_KEY_STORAGE); } catch { /* noop */ } };
 
+// Bir nechta model — biri mavjud bo'lmasa (404) keyingisiga o'tadi
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash"];
+
+// Anthropic uslubidagi messages'ni Gemini "contents" formatiga o'girish
+function toGeminiContents(messages) {
+  return messages.map((m) => {
+    const role = m.role === "assistant" ? "model" : "user";
+    let parts;
+    if (typeof m.content === "string") {
+      parts = [{ text: m.content }];
+    } else if (Array.isArray(m.content)) {
+      parts = m.content.map((b) => {
+        if (b.type === "text") return { text: b.text };
+        if (b.type === "image") return { inline_data: { mime_type: b.source.media_type, data: b.source.data } };
+        return { text: "" };
+      });
+    } else {
+      parts = [{ text: String(m.content ?? "") }];
+    }
+    return { role, parts };
+  });
+}
+
 async function callAI(messages, maxTokens = 1200) {
   const key = getApiKey();
   if (!key) throw new Error("NO_API_KEY");
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }),
+  const body = JSON.stringify({
+    contents: toGeminiContents(messages),
+    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
   });
-  if (!resp.ok) throw new Error("API_" + resp.status);
-  const data = await resp.json();
-  return (data.content || []).map((i) => i.text || "").join("");
+  let lastErr = null;
+  for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    if (resp.ok) {
+      const data = await resp.json();
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      return parts.map((p) => p.text || "").join("");
+    }
+    if (resp.status === 404) { lastErr = new Error("API_404"); continue; } // model topilmadi → keyingisi
+    throw new Error("API_" + resp.status);
+  }
+  throw lastErr || new Error("API_ERR");
 }
 
 function parseJSON(text) {
@@ -552,9 +579,9 @@ Rules:
 JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e.g. 250g","calories":number,"protein":number,"fat":number,"carbs":number,"fiber":number}],"total":{"calories":number,"protein":number,"fat":number,"carbs":number,"fiber":number},"health_score":number,"recommendation":"string"}`;
 
   const errMsg = () => {
-    if (!getApiKey()) return lang === "uz" ? "AI uchun Profil → Sozlamalar → «AI kaliti» dan Anthropic API kalitini kiriting."
-      : lang === "ru" ? "Для ИИ введите ключ Anthropic API: Профиль → Настройки → «AI kaliti»."
-      : "To use AI, add your Anthropic API key in Profile → Settings → \"AI kaliti\".";
+    if (!getApiKey()) return lang === "uz" ? "AI uchun Profil → Sozlamalar → «AI kaliti» dan Google Gemini API kalitini kiriting (bepul: aistudio.google.com/apikey)."
+      : lang === "ru" ? "Для ИИ введите ключ Google Gemini API: Профиль → Настройки → «AI kaliti» (бесплатно: aistudio.google.com/apikey)."
+      : "To use AI, add your free Google Gemini API key in Profile → Settings → \"AI kaliti\" (aistudio.google.com/apikey).";
     return lang === "uz" ? "Tahlil qilib bo'lmadi. Qaytadan urinib ko'ring yoki qo'lda kiriting."
       : lang === "ru" ? "Не удалось проанализировать. Попробуйте снова." : "Analysis failed. Try again.";
   };
@@ -1721,7 +1748,7 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
                 <button onClick={() => {
                   const cur = getApiKey();
                   const v = window.prompt(
-                    "Anthropic API kalitini kiriting (sk-ant-...).\nKalit faqat shu brauzeringizda saqlanadi.\nBo'sh qoldirsangiz — o'chiriladi.",
+                    "Google Gemini API kalitini kiriting (AIza...).\nBepul olish: https://aistudio.google.com/apikey\nKalit faqat shu brauzeringizda saqlanadi. Bo'sh qoldirsangiz — o'chiriladi.",
                     cur,
                   );
                   if (v !== null) { setApiKey(v.trim()); setApiKeySet(!!v.trim()); }
