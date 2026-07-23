@@ -292,8 +292,17 @@ const API_KEY_STORAGE = "nutriai:apikey";
 export const getApiKey = () => { try { return localStorage.getItem(API_KEY_STORAGE) || ""; } catch { return ""; } };
 export const setApiKey = (k) => { try { k ? localStorage.setItem(API_KEY_STORAGE, k) : localStorage.removeItem(API_KEY_STORAGE); } catch { /* noop */ } };
 
-// Bir nechta model — biri mavjud bo'lmasa (404) keyingisiga o'tadi
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash"];
+// Bir nechta model — biri topilmasa (404) yoki kvotasi tugasa (429) keyingisiga o'tadi.
+// Har modelning bepul kvotasi alohida.
+const GEMINI_MODELS = [
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-flash-latest",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+];
 
 // Anthropic uslubidagi messages'ni Gemini "contents" formatiga o'girish
 function toGeminiContents(messages) {
@@ -333,7 +342,12 @@ async function callAI(messages, maxTokens = 1200) {
       if (!out) throw new Error("BO'SH JAVOB (ehtimol xavfsizlik filtri)");
       return out;
     }
-    if (resp.status === 404) { lastErr = new Error("API_404 model"); continue; } // model topilmadi → keyingisi
+    // 404 (model yo'q) yoki 429 (kvota tugagan) → keyingi modelni sinaymiz
+    if (resp.status === 404 || resp.status === 429) {
+      let d = ""; try { const j = await resp.json(); d = j?.error?.message || ""; } catch { /* noop */ }
+      lastErr = new Error(`API_${resp.status}${d ? ": " + d.slice(0, 90) : ""}`);
+      continue;
+    }
     let detail = "";
     try { const j = await resp.json(); detail = j?.error?.message || ""; } catch { /* noop */ }
     throw new Error(`API_${resp.status}${detail ? ": " + detail.slice(0, 120) : ""}`);
