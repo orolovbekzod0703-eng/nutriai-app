@@ -621,11 +621,13 @@ Rules:
 JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e.g. 250g","calories":number,"protein":number,"fat":number,"carbs":number,"fiber":number}],"total":{"calories":number,"protein":number,"fat":number,"carbs":number,"fiber":number},"health_score":number,"recommendation":"string"}`;
 
   const errMsg = () => {
-    if (!getApiKey()) return lang === "uz" ? "AI uchun Profil → Sozlamalar → «AI kaliti» dan Google Gemini API kalitini kiriting (bepul: aistudio.google.com/apikey)."
+    // Na o'z kaliti, na backend proksi bo'lsa — kalit so'raymiz
+    if (!getApiKey() && !PROXY_URL) return lang === "uz" ? "AI uchun Profil → Sozlamalar → «AI kaliti» dan Google Gemini API kalitini kiriting (bepul: aistudio.google.com/apikey)."
       : lang === "ru" ? "Для ИИ введите ключ Google Gemini API: Профиль → Настройки → «AI kaliti» (бесплатно: aistudio.google.com/apikey)."
       : "To use AI, add your free Google Gemini API key in Profile → Settings → \"AI kaliti\" (aistudio.google.com/apikey).";
-    return lang === "uz" ? "Tahlil qilib bo'lmadi. Qaytadan urinib ko'ring yoki qo'lda kiriting."
-      : lang === "ru" ? "Не удалось проанализировать. Попробуйте снова." : "Analysis failed. Try again.";
+    return lang === "uz" ? "Tahlil qilib bo'lmadi. Biroz kutib qayta urinib ko'ring yoki 🔍 Qidiruvdan qo'lda qo'shing."
+      : lang === "ru" ? "Не удалось проанализировать. Попробуйте позже или добавьте вручную через 🔍 Поиск."
+      : "Analysis failed. Try again later or add manually via 🔍 Search.";
   };
 
   const analyzePhoto = async () => {
