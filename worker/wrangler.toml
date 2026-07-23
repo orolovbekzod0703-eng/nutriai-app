@@ -2,6 +2,10 @@ name = "nutriai-proxy"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# Cloudflare Workers AI (bepul) — rasm/matn tahlili shu orqali
+[ai]
+binding = "AI"
+
 # Firestore/Firebase loyiha ID (token tekshiruvi uchun)
 [vars]
 FIREBASE_PROJECT_ID = "fit-counter-ai"

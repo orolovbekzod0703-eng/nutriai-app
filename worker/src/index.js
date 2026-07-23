@@ -2,17 +2,12 @@
    NutriAI proksi — Cloudflare Worker
    • Firebase ID token'ni tekshiradi (faqat kirgan foydalanuvchi)
    • Har foydalanuvchiga kunlik AI limiti qo'yadi (KV)
-   • So'rovni yashirin GEMINI_API_KEY bilan Gemini'ga uzatadi
+   • Cloudflare Workers AI (bepul) orqali tahlil qiladi
    ═══════════════════════════════════════════════════════════ */
 
-const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-1.5-flash",
-];
-const DAILY_LIMIT = 30; // har foydalanuvchiga kuniga (o'zgartirsa bo'ladi)
+const DAILY_LIMIT = 40;
+const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
+const TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 export default {
   async fetch(request, env) {
@@ -45,39 +40,67 @@ export default {
       const key = `c:${uid}:${day}`;
       const cur = parseInt((await env.RL.get(key)) || "0", 10);
       if (cur >= DAILY_LIMIT) {
-        return json({ error: { message: `Kunlik AI limiti (${DAILY_LIMIT}) tugadi. Ertaga urinib ko'ring yoki Profil → Sozlamalar → «AI kaliti» dan o'z bepul kalitingizni qo'shing.` } }, 429, cors);
+        return json({ error: { message: `Kunlik AI limiti (${DAILY_LIMIT}) tugadi. Ertaga urinib ko'ring.` } }, 429, cors);
       }
       await env.RL.put(key, String(cur + 1), { expirationTtl: 172800 });
     }
 
-    // 3) So'rovni Gemini'ga uzatish
+    // 3) So'rov (Gemini "contents" formatida keladi)
     let body;
     try { body = await request.json(); } catch { return json({ error: { message: "Bad JSON" } }, 400, cors); }
-    const payload = JSON.stringify({
-      contents: body.contents,
-      generationConfig: body.generationConfig || { maxOutputTokens: 1200, temperature: 0.4 },
-    });
+    const maxTokens = body?.generationConfig?.maxOutputTokens || 1200;
 
-    let lastErr = "";
-    for (const model of GEMINI_MODELS) {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: payload },
-      );
-      if (r.ok) {
-        const data = await r.json();
-        return json(data, 200, cors);
-      }
-      if (r.status === 404 || r.status === 429) { lastErr = `API_${r.status}`; continue; }
-      const txt = await r.text();
-      return new Response(txt, { status: r.status, headers: { ...cors, "Content-Type": "application/json" } });
+    try {
+      const text = await runAI(env, body.contents || [], maxTokens);
+      // Frontend Gemini shaklini kutadi — shu shaklda qaytaramiz
+      return json({ candidates: [{ content: { parts: [{ text }] } }] }, 200, cors);
+    } catch (e) {
+      return json({ error: { message: "AI xatosi: " + (e?.message || "nomalum") } }, 502, cors);
     }
-    return json({ error: { message: lastErr || "AI xizmati vaqtincha band" } }, 429, cors);
   },
 };
 
 function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const arr = new Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+// ─── Cloudflare Workers AI chaqiruvi ───
+async function runAI(env, contents, maxTokens) {
+  let imageBytes = null;
+  const textChunks = [];
+  const messages = [];
+
+  for (const c of contents) {
+    const role = c.role === "model" ? "assistant" : "user";
+    let msgText = "";
+    for (const p of c.parts || []) {
+      if (p.text) { textChunks.push(p.text); msgText += p.text + "\n"; }
+      else if (p.inline_data?.data && !imageBytes) imageBytes = b64ToBytes(p.inline_data.data);
+    }
+    if (msgText.trim()) messages.push({ role, content: msgText.trim() });
+  }
+
+  if (imageBytes) {
+    const out = await env.AI.run(VISION_MODEL, {
+      image: imageBytes,
+      prompt: textChunks.join("\n\n"),
+      max_tokens: Math.min(maxTokens, 2048),
+    });
+    return out.response || out.description || "";
+  }
+
+  const out = await env.AI.run(TEXT_MODEL, {
+    messages,
+    max_tokens: Math.min(maxTokens, 2048),
+  });
+  return out.response || "";
 }
 
 // ─── Firebase ID token (RS256 JWT) tekshiruvi ───
