@@ -11,7 +11,7 @@ ALLOWED_ORIGIN = "https://orolovbekzod0703-eng.github.io"
 # `npx wrangler kv namespace create RL` buyrug'i bergan id ni shu yerga qo'ying:
 [[kv_namespaces]]
 binding = "RL"
-id = "QO_YING_KV_ID"
+id = "baee35b62e8347c4b91674e260811122"
 
 # GEMINI_API_KEY — bu yerga YOZMANG! Uni secret sifatida qo'shasiz:
 #   npx wrangler secret put GEMINI_API_KEY
