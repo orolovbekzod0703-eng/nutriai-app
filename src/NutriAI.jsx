@@ -329,10 +329,14 @@ async function callAI(messages, maxTokens = 1200) {
     if (resp.ok) {
       const data = await resp.json();
       const parts = data?.candidates?.[0]?.content?.parts || [];
-      return parts.map((p) => p.text || "").join("");
+      const out = parts.map((p) => p.text || "").join("");
+      if (!out) throw new Error("BO'SH JAVOB (ehtimol xavfsizlik filtri)");
+      return out;
     }
-    if (resp.status === 404) { lastErr = new Error("API_404"); continue; } // model topilmadi → keyingisi
-    throw new Error("API_" + resp.status);
+    if (resp.status === 404) { lastErr = new Error("API_404 model"); continue; } // model topilmadi → keyingisi
+    let detail = "";
+    try { const j = await resp.json(); detail = j?.error?.message || ""; } catch { /* noop */ }
+    throw new Error(`API_${resp.status}${detail ? ": " + detail.slice(0, 120) : ""}`);
   }
   throw lastErr || new Error("API_ERR");
 }
@@ -598,7 +602,7 @@ JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e
         ],
       }]);
       setAiResult(parseJSON(text));
-    } catch { setAiError(errMsg()); }
+    } catch (e) { console.error("analyzePhoto:", e); setAiError(errMsg() + (e?.message ? `  [${e.message}]` : "")); }
     setAiLoading(false);
   };
 
@@ -611,7 +615,7 @@ JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e
         content: `${sysRules}\n\nUser described their meal: "${mealText}"\nAnalyze it.`,
       }]);
       setAiResult(parseJSON(text));
-    } catch { setAiError(errMsg()); }
+    } catch (e) { console.error("analyzeText:", e); setAiError(errMsg() + (e?.message ? `  [${e.message}]` : "")); }
     setAiLoading(false);
   };
 
