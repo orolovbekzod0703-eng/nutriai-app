@@ -278,6 +278,10 @@ function calcTargets(p) {
 const fmt = (n) => Math.round(n || 0).toLocaleString();
 const dayKey = (d) => new Date(d).toDateString();
 
+// Har ovqat uchun noyob id — tez ketma-ket qo'shilsa ham to'qnashmaydi
+let _idCounter = 0;
+const newId = () => `${Date.now()}-${_idCounter++}-${Math.random().toString(36).slice(2, 6)}`;
+
 async function store(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* noop */ }
 }
@@ -501,6 +505,7 @@ export default function NutriAI() {
   const [aiError, setAiError] = useState(null);
   const [searchQ, setSearchQ] = useState("");
   const [newWeight, setNewWeight] = useState("");
+  const [justAdded, setJustAdded] = useState(null); // bazadan qo'shilganda qisqa "✓" belgisi
 
   const [chat, setChat] = useState([]);
   const [chatInput, setChatInput] = useState("");
@@ -714,7 +719,7 @@ JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e
   const saveMeal = () => {
     if (!aiResult) return;
     setMeals((prev) => [{
-      id: Date.now(), type: mealType, name: aiResult.meal_name,
+      id: newId(), type: mealType, name: aiResult.meal_name,
       items: aiResult.items,
       cal: aiResult.total.calories, p: aiResult.total.protein,
       f: aiResult.total.fat, c: aiResult.total.carbs, fi: aiResult.total.fiber,
@@ -727,12 +732,15 @@ JSON schema: {"meal_name":"string","items":[{"name":"string","portion":"string e
 
   const addFromDB = (food) => {
     setMeals((prev) => [{
-      id: Date.now(), type: mealType, name: food[lang],
+      id: newId(), type: mealType, name: food[lang],
       items: [{ name: food[lang], portion: food.portion, calories: food.cal, protein: food.p, fat: food.f, carbs: food.c, fiber: food.fi }],
       cal: food.cal, p: food.p, f: food.f, c: food.c, fi: food.fi,
       score: food.score, rec: null, emoji: food.emoji, time: new Date(),
     }, ...prev]);
-    closeMeal();
+    // Modal ochiq qoladi — foydalanuvchi ketma-ket bir necha ovqat qo'sha oladi.
+    // Qisqa "qo'shildi" belgisi:
+    setJustAdded(food.id);
+    setTimeout(() => setJustAdded((v) => (v === food.id ? null : v)), 900);
   };
 
   const closeMeal = () => {
@@ -1240,8 +1248,8 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
                       <button onClick={() => toggleFav(f.id)} style={{ background: "none", border: "none", fontSize: 17, cursor: "pointer", opacity: favorites.includes(f.id) ? 1 : .25 }}>⭐</button>
                       <button onClick={() => addFromDB(f)} style={{
                         width: 32, height: 32, borderRadius: 10, border: "none", cursor: "pointer",
-                        background: GREEN, color: "#fff", fontSize: 20, fontWeight: 700, flexShrink: 0,
-                      }}>+</button>
+                        background: justAdded === f.id ? GREEN_LT : GREEN, color: "#fff", fontSize: 18, fontWeight: 700, flexShrink: 0,
+                      }}>{justAdded === f.id ? "✓" : "+"}</button>
                     </div>
                   ))}
                   {!filteredFoods.length && <p style={{ textAlign: "center", color: T.muted, padding: 24 }}>{t.noData}</p>}
@@ -1257,11 +1265,11 @@ Meals: ${todayMeals.map((m) => `${m.name} (${m.cal}kcal, score ${m.score})`).joi
                   {FOOD_DB.filter((f) => favorites.includes(f.id)).map((f) => (
                     <button key={f.id} onClick={() => addFromDB(f)} style={{
                       padding: 14, borderRadius: 16, cursor: "pointer", textAlign: "left",
-                      border: `1px solid ${T.cardBorder}`, background: T.input,
+                      border: `2px solid ${justAdded === f.id ? GREEN : T.cardBorder}`, background: T.input,
                     }}>
                       <div style={{ fontSize: 26, marginBottom: 6 }}>{f.emoji}</div>
                       <div style={{ fontWeight: 700, fontSize: 13, color: T.text2, lineHeight: 1.25 }}>{f[lang]}</div>
-                      <div style={{ fontSize: 12, color: GREEN, fontWeight: 800, marginTop: 4 }}>{f.cal} kcal</div>
+                      <div style={{ fontSize: 12, color: GREEN, fontWeight: 800, marginTop: 4 }}>{justAdded === f.id ? "✓ +1" : `${f.cal} kcal`}</div>
                     </button>
                   ))}
                 </div>
